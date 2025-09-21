@@ -57,6 +57,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             }
           }
         }
+      },
+      {
+        name: "list_executions",
+        description: "List all execution IDs currently stored in memory",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
       }
     ]
   };
@@ -72,6 +80,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "execute_direct":
         return await handleExecuteDirect(args);
+
+      case "list_executions":
+        return handleListExecutions();
 
       default:
         throw new Error(`Unknown tool: ${name}`);
@@ -118,10 +129,28 @@ async function handleExecuteDirect(args: any) {
     throw new Error(result.error || 'Failed to execute query');
   }
 
+  // Always return metadata only - no legacy mode
   return {
     content: [{
       type: "text",
-      text: JSON.stringify(result.data, null, 2)
+      text: JSON.stringify({
+        executionId: result.executionId,
+        status: result.status,
+        recordCount: result.recordCount,
+        executedAt: result.executedAt,
+        message: "Data fetched successfully. Use client-side retrieval for full data."
+      }, null, 2)
+    }]
+  };
+}
+
+function handleListExecutions() {
+  const table = hybridService.getExecutionsTable();
+
+  return {
+    content: [{
+      type: "text",
+      text: table
     }]
   };
 }

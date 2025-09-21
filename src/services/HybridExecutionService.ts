@@ -81,8 +81,8 @@ export class HybridExecutionService {
         executionId,
         status: 'success',
         recordCount,
-        data: response.data,
         executedAt: new Date().toISOString()
+        // Always returns metadata only - data is never passed through
       };
     } catch (error) {
       spec.status = 'error';
@@ -141,5 +141,67 @@ export class HybridExecutionService {
     // Return spec without any data field
     const { ...summary } = spec;
     return summary;
+  }
+
+  // Get a formatted table of all stored execution IDs
+  getExecutionsTable(): string {
+    const specs = this.getActiveSpecs();
+
+    if (specs.length === 0) {
+      return 'No executions stored in memory';
+    }
+
+    // Create table header
+    const headers = ['Execution ID', 'Tool', 'Dataset ID', 'Status', 'Age', 'Expires In'];
+    const divider = headers.map(h => '-'.repeat(h.length));
+
+    // Create table rows
+    const now = Date.now();
+    const rows = specs.map(spec => {
+      const age = now - new Date(spec.timestamp).getTime();
+      const ttl = spec.ttl || DEFAULT_TTL;
+      const expiresIn = Math.max(0, ttl - age);
+
+      return [
+        spec.executionId.substring(0, 8) + '...',
+        spec.toolName,
+        spec.parameters.datasetId || 'N/A',
+        spec.status,
+        this.formatDuration(age),
+        expiresIn > 0 ? this.formatDuration(expiresIn) : 'EXPIRED'
+      ];
+    });
+
+    // Find max width for each column
+    const columnWidths = headers.map((header, i) => {
+      const widths = [header.length, ...rows.map(row => row[i].length)];
+      return Math.max(...widths);
+    });
+
+    // Format table
+    const formatRow = (row: string[]) =>
+      '| ' + row.map((cell, i) => cell.padEnd(columnWidths[i])).join(' | ') + ' |';
+
+    const table = [
+      formatRow(headers),
+      formatRow(divider.map((d, i) => '-'.repeat(columnWidths[i]))),
+      ...rows.map(formatRow)
+    ].join('\n');
+
+    return table;
+  }
+
+  private formatDuration(ms: number): string {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+
+    if (hours > 0) {
+      return `${hours}h ${minutes % 60}m`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${seconds % 60}s`;
+    } else {
+      return `${seconds}s`;
+    }
   }
 }
