@@ -62,3 +62,26 @@ export interface ABSError extends Error {
     statusText?: string;
     url?: string;
 }
+
+export interface ExecutionMetadata {
+  executionId: string;
+  endpoint: string;
+  timestamp: string;
+  hybridReady: boolean;
+}
+
+export interface ApiCallInfo {
+  method: string;
+  url: string;
+  params: Record<string, any>;
+}
+
+export interface HybridResponse {
+  executionId: string;
+  status: 'success' | 'error' | 'pending';
+  datasetId: string;
+  recordCount: number;
+  summary: string;
+  apiCall?: ApiCallInfo;
+  data?: any; // Optional - should NOT be included
+}

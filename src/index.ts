@@ -6,9 +6,10 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import axios, { AxiosError } from "axios";
+import { HybridExecutionService } from './services/HybridExecutionService.js';
 
-const ABS_API_BASE = "https://api.data.abs.gov.au";
+// Initialize hybrid execution service
+const hybridService = new HybridExecutionService();
 
 const server = new Server(
   {
@@ -31,7 +32,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: "query_dataset",
-        description: "Query a specific ABS dataset with optional filters",
+        description: "Query a specific ABS dataset - returns execution spec for client-side data retrieval",
         inputSchema: {
           type: "object",
           required: ["datasetId"],
@@ -39,6 +40,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             datasetId: {
               type: "string",
               description: "ID of the dataset to query (e.g., C21_G01_LGA)"
+            }
+          }
+        }
+      },
+      {
+        name: "execute_direct",
+        description: "Execute a query directly using execution ID",
+        inputSchema: {
+          type: "object",
+          required: ["executionId"],
+          properties: {
+            executionId: {
+              type: "string",
+              description: "Execution ID from previous query"
             }
           }
         }
@@ -51,35 +66,65 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     const { name, arguments: args } = request.params;
 
-    if (name !== "query_dataset") {
-      throw new Error(`Unknown tool: ${name}`);
-    }
+    switch (name) {
+      case "query_dataset":
+        return await handleQueryDataset(args);
 
-    if (!args?.datasetId || typeof args.datasetId !== "string") {
-      throw new Error("datasetId is required and must be a string");
-    }
+      case "execute_direct":
+        return await handleExecuteDirect(args);
 
-    const url = `${ABS_API_BASE}/data/${args.datasetId}/all?format=json&dimensionAtObservation=AllDimensions`;
-    
-    try {
-      const response = await axios.get(url);
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(response.data, null, 2)
-        }]
-      };
-    } catch (error) {
-      if (error instanceof AxiosError && error.response) {
-        throw new Error(`ABS API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
-      }
-      throw error;
+      default:
+        throw new Error(`Unknown tool: ${name}`);
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Error querying dataset: ${errorMessage}`);
+    throw new Error(`Error executing tool ${request.params.name}: ${errorMessage}`);
   }
 });
+
+async function handleQueryDataset(args: any) {
+  if (!args?.datasetId || typeof args.datasetId !== "string") {
+    throw new Error("datasetId is required and must be a string");
+  }
+
+  const executionSpec = await hybridService.generateExecutionSpec({
+    toolName: "query_dataset",
+    parameters: args
+  });
+
+  // Always return spec only - never include data in LLM response
+  return {
+    content: [{
+      type: "text",
+      text: JSON.stringify({
+        ...executionSpec,
+        status: "ready",
+        datasetId: args.datasetId,
+        message: "Use execute_direct tool with this executionId to fetch data"
+      }, null, 2)
+    }],
+    _meta: executionSpec
+  };
+}
+
+async function handleExecuteDirect(args: any) {
+  if (!args?.executionId) {
+    throw new Error("executionId is required");
+  }
+
+  const result = await hybridService.executeSpec(args.executionId);
+
+  if (result.status === 'error') {
+    throw new Error(result.error || 'Failed to execute query');
+  }
+
+  return {
+    content: [{
+      type: "text",
+      text: JSON.stringify(result.data, null, 2)
+    }]
+  };
+}
 
 async function main() {
   try {
